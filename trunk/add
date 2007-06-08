@@ -9,6 +9,12 @@ my $new_chain=0;
 my $forward_to_add=0;
 my $count;
 
+$SIG{HUP} = \&exitlog;
+$SIG{INT} = \&exitlog;
+$SIG{QUIT} = \&exitlog;
+$SIG{KILL} = \&exitlog;
+$SIG{TERM} = \&exitlog;
+
 foreach my $temp (@ARGV) {
     if ($temp =~ '^-f$') {
 	$fg=1;
@@ -41,9 +47,9 @@ if ($forward_to_add==0) {
     system ("iptables -I INPUT -p tcp --dport 80 -j ADD");
 }
 
-
+my $date=scalar(localtime);
 open WLOG,">>/var/log/apache_dos_defender.log" or die "unable to open log file : $! \n";
-print WLOG "\nApache Dos Defender started :: ",`date`;
+print WLOG "\nApache Dos Defender started :: $date\n";
 &verbose ("Apache Dos Defender Started\n");
 while () {
 
@@ -77,13 +83,16 @@ while () {
 	&verbose ("INFO ::: $line has $hash{$line} connections.\n");
 	if ($hash{$line} > $ARGV[1]) {
 	    $iptables=`iptables -L -n`;
+	    if ($line =~ /\?/) {
+	    $line = s/\?//;
+	}
+	    next if $line == '';
 	    if ($iptables =~ /$line/g) { 
 		next ;
 	    } else {
 		next if $line =~ /127.0.0.1/;
 		&verbose ("WARNING *** $line has $hash{$line} connections.\n");
-		my $date=`date`;
-		chomp $date;
+		my $date=scalar(localtime);
 		print WLOG "$date :: $line has $hash{$line} connections.\n";
 		system "iptables -A ADD -s $line -j DROP";
 	    }}}
@@ -99,4 +108,11 @@ while () {
 
 sub verbose {
     print "@_" if $fg==1;
+}
+
+sub exitlog {
+    my $date=scalar(localtime);
+    print WLOG ("!!! : $date : ADD Terminated\n");
+	&verbose ("ADD Terminated\n");
+    exit;
 }

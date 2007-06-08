@@ -2,14 +2,49 @@
 use warnings;
 use strict;
 
-die "wrong syntax!\nddf <server-status page> <maximum number of connections>\nExample : \nddf http://127.0.0.1/server-status/ 40\n" unless $ARGV[1];
+die "wrong syntax!\nadd <server-status page> <maximum number of connections> <-f>\nadd http://127.0.0.1/server-status/ 40\n" unless $ARGV[1];
+
+my $fg=0;
+my $new_chain=0;
+my $forward_to_add=0;
+my $count;
+
+foreach my $temp (@ARGV) {
+    if ($temp =~ '^-f$') {
+	$fg=1;
+    }
+}
+
+if ($fg==0) {
+    exit if fork();
+}
 
 
-exit if fork;
+foreach my $temp (`iptables -L -n -v -x`) {
+
+    if ($temp =~ 'ADD        tcp') {
+	$forward_to_add=1;
+    }
+
+    if ($temp =~ 'Chain ADD') {
+	$new_chain=1;
+    }
+}
+
+if ($new_chain==0) {
+    &verbose ("iptables ADD chain does not exist\n");
+    system ("iptables -N ADD");
+}
+
+if ($forward_to_add==0) {
+    &verbose ("iptables forward does not exist\n");
+    system ("iptables -I INPUT -p tcp --dport 80 -j ADD");
+}
 
 
 open WLOG,">>/var/log/apache_dos_defender.log" or die "unable to open log file : $! \n";
-
+print WLOG "\nApache Dos Defender started :: ",`date`;
+&verbose ("Apache Dos Defender Started\n");
 while () {
 
     my @links=`links -dump $ARGV[0]`;
@@ -20,7 +55,6 @@ while () {
     my $line;
     my %hash;
     my $iptables;
-
     foreach $line (@links) {
 	if ($start==1) {
 	    if ($line =~ /----------------------------------------------------------------------/) {
@@ -40,15 +74,29 @@ while () {
     }
     @keys=keys %hash;
     foreach $line (@keys) {
+	&verbose ("INFO ::: $line has $hash{$line} connections.\n");
 	if ($hash{$line} > $ARGV[1]) {
 	    $iptables=`iptables -L -n`;
-	    chomp $iptables;
 	    if ($iptables =~ /$line/g) { 
 		next ;
 	    } else {
 		next if $line =~ /127.0.0.1/;
-		print WLOG "$line has $hash{$line} connections\n";
-		system "iptables -A INPUT -s $line -j DROP";
+		&verbose ("WARNING *** $line has $hash{$line} connections.\n");
+		my $date=`date`;
+		chomp $date;
+		print WLOG "$date :: $line has $hash{$line} connections.\n";
+		system "iptables -A ADD -s $line -j DROP";
 	    }}}
-	sleep 2;
-    }
+    sleep 1;
+    $count++;
+
+    if ($count > 3600) {
+	&verbose ("Firewall Reinitialized\n");
+	system "iptables -F ADD";
+	$count=0;
+    }}
+
+
+sub verbose {
+    print "@_" if $fg==1;
+}
